@@ -1,0 +1,12 @@
+{
+  "name": "shiftcal",
+  "version": "1.0.0",
+  "description": "Find your shifts in a staff schedule PDF and add them to your calendar. Runs entirely in the browser.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python3 -m http.server 8080"
+  },
+  "license": "MIT"
+}

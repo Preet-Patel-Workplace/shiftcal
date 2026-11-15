@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ShiftCal: your shifts from the staff schedule</title>
+  <meta name="description" content="Upload the staff schedule as a PDF or a photo, find your own shifts, and add them to your calendar with reminders. Everything stays on your device.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="theme-color" content="#f2f4f8">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="preload" href="fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to your shifts</a>
+
+  <header class="top">
+    <div class="top__in">
+      <p class="brand"><span class="mark">ShiftCal</span></p>
+      <div class="top__actions">
+        <button type="button" class="btn btn--quiet" id="open-upload">Upload schedule</button>
+        <button type="button" class="btn btn--quiet" id="open-settings">Settings</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="page">
+    <noscript><p class="notice">ShiftCal needs JavaScript turned on to read your schedule.</p></noscript>
+
+    <!-- First visit: ask for the name on the schedule -->
+    <section id="view-welcome" class="welcome" hidden>
+      <h1 class="welcome__title">Find your row on the staff schedule.</h1>
+      <p class="welcome__lead">Upload the schedule your workplace sends out, as a PDF or a photo. ShiftCal picks out your shifts and puts them in your calendar, with reminders. The schedule never leaves this device.</p>
+      <form id="welcome-form" class="welcome__form" novalidate>
+        <label for="welcome-name">Your name, as it appears on the schedule</label>
+        <div class="row">
+          <input id="welcome-name" name="name" type="text" autocomplete="name" maxlength="80" required placeholder="First and last name">
+          <button type="submit" class="btn btn--primary">Continue</button>
+        </div>
+        <p class="field-error" id="welcome-error" role="alert" hidden>Type your name so ShiftCal knows which row is yours.</p>
+      </form>
+      <p class="welcome__alt">Just looking? <button type="button" class="link" id="welcome-sample">Try a sample schedule</button></p>
+    </section>
+
+    <!-- Dashboard -->
+    <div id="view-dashboard" class="dash" hidden>
+      <div id="banner" class="notice" hidden></div>
+
+      <section class="next" aria-labelledby="next-title">
+        <h1 id="next-title" class="next__title">Next shift</h1>
+        <div id="next-body"></div>
+        <div class="next__actions" id="next-actions"></div>
+      </section>
+
+      <section class="changes" id="changes" aria-labelledby="changes-title" hidden></section>
+
+      <section class="rota" aria-labelledby="rota-title">
+        <div class="rota__head">
+          <h2 id="rota-title">Your row</h2>
+          <div class="rota__nav">
+            <button type="button" class="btn btn--quiet" id="rota-prev" aria-label="Earlier weeks">Earlier</button>
+            <button type="button" class="btn btn--quiet" id="rota-today">Today</button>
+            <button type="button" class="btn btn--quiet" id="rota-next" aria-label="Later weeks">Later</button>
+          </div>
+        </div>
+        <div class="rota__scroll">
+          <table class="rota__table" id="rota-table"></table>
+        </div>
+        <p class="rota__totals" id="totals"></p>
+      </section>
+
+      <section class="list" aria-labelledby="list-title">
+        <div class="list__head">
+          <h2 id="list-title">Upcoming shifts</h2>
+          <button type="button" class="btn btn--quiet" id="add-shift">Add a shift</button>
+        </div>
+        <div id="list-body"></div>
+        <details class="past" id="past" hidden>
+          <summary>Past shifts</summary>
+          <div id="past-body"></div>
+        </details>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <p>Your schedule and shifts are stored in this browser only. Nothing is uploaded.</p>
+  </footer>
+
+  <input type="file" id="file-input" accept="application/pdf,.pdf,image/*" hidden>
+
+  <!-- Upload and review -->
+  <dialog id="dlg-import" class="dlg" aria-labelledby="import-title">
+    <form method="dialog" class="dlg__in" id="import-form">
+      <h2 id="import-title" tabindex="-1">Upload schedule</h2>
+      <div id="import-body"></div>
+      <div class="dlg__actions" id="import-actions"></div>
+    </form>
+  </dialog>
+
+  <!-- Add to calendar -->
+  <dialog id="dlg-export" class="dlg" aria-labelledby="export-title">
+    <form method="dialog" class="dlg__in">
+      <h2 id="export-title" tabindex="-1">Add to calendar</h2>
+      <div id="export-body"></div>
+      <div class="dlg__actions" id="export-actions"></div>
+    </form>
+  </dialog>
+
+  <!-- Add or edit one shift -->
+  <dialog id="dlg-shift" class="dlg" aria-labelledby="shift-title">
+    <form class="dlg__in" id="shift-form" novalidate>
+      <h2 id="shift-title" tabindex="-1">Add a shift</h2>
+      <div class="fields">
+        <div class="field">
+          <label for="shift-date">Date</label>
+          <input type="date" id="shift-date" required>
+        </div>
+        <div class="field field--half">
+          <label for="shift-start">Starts</label>
+          <input type="time" id="shift-start" required>
+        </div>
+        <div class="field field--half">
+          <label for="shift-end">Ends</label>
+          <input type="time" id="shift-end" required>
+        </div>
+        <p class="hint" id="shift-overnight" hidden>Ends the next day.</p>
+        <div class="field">
+          <label for="shift-label">Label <span class="optional">optional</span></label>
+          <input type="text" id="shift-label" maxlength="60" placeholder="On call, Training, Front desk">
+        </div>
+        <div class="field">
+          <label for="shift-note">Note <span class="optional">optional</span></label>
+          <textarea id="shift-note" rows="2" maxlength="500"></textarea>
+        </div>
+      </div>
+      <p id="shift-google-wrap" hidden><a id="shift-google" class="link" target="_blank" rel="noopener noreferrer" href="https://calendar.google.com/">Open this shift in Google Calendar</a></p>
+      <p class="field-error" id="shift-error" role="alert" hidden></p>
+      <div class="dlg__actions">
+        <button type="button" class="btn btn--danger" id="shift-delete" hidden>Delete shift</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn--quiet" id="shift-cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="shift-save">Save shift</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Settings -->
+  <dialog id="dlg-settings" class="dlg dlg--wide" aria-labelledby="settings-title">
+    <form class="dlg__in" id="settings-form" novalidate>
+      <h2 id="settings-title" tabindex="-1">Settings</h2>
+
+      <fieldset class="group">
+        <legend>You</legend>
+        <div class="field">
+          <label for="set-name">Your name, as it appears on the schedule</label>
+          <input type="text" id="set-name" maxlength="80" autocomplete="name">
+        </div>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Calendar events</legend>
+        <div class="field">
+          <label for="set-title">Event title</label>
+          <input type="text" id="set-title" maxlength="80" placeholder="Work shift">
+        </div>
+        <div class="field">
+          <label for="set-location">Workplace or address <span class="optional">optional</span></label>
+          <input type="text" id="set-location" maxlength="120">
+        </div>
+        <div class="field">
+          <span class="label" id="rem-label">Remind me</span>
+          <div class="checks" role="group" aria-labelledby="rem-label" id="set-reminders">
+            <label><input type="checkbox" value="1440"> 1 day before</label>
+            <label><input type="checkbox" value="120"> 2 hours before</label>
+            <label><input type="checkbox" value="60"> 1 hour before</label>
+            <label><input type="checkbox" value="30"> 30 minutes before</label>
+            <label><input type="checkbox" value="15"> 15 minutes before</label>
+          </div>
+          <p class="hint">Reminders are written into the calendar file. Some calendar apps, Google Calendar among them, may use their own default reminder instead.</p>
+        </div>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Hours</legend>
+        <div class="inline">
+          <label for="set-break">Take off an unpaid break of</label>
+          <input type="number" id="set-break" min="0" max="180" step="5" inputmode="numeric">
+          <label for="set-break-after">minutes on shifts longer than</label>
+          <input type="number" id="set-break-after" min="0" max="24" step="0.5" inputmode="decimal">
+          <span>hours</span>
+        </div>
+        <p class="hint">Set the break to 0 to count the whole shift.</p>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Reading the schedule</legend>
+        <div class="field">
+          <label for="set-date-order">Dates written as numbers</label>
+          <select id="set-date-order">
+            <option value="auto">Work it out from the schedule</option>
+            <option value="MDY">Month first (11/16 is November 16)</option>
+            <option value="DMY">Day first (16/11 is November 16)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="set-earliest">Earliest a shift starts</label>
+          <select id="set-earliest">
+            <option value="4">4 am</option>
+            <option value="5">5 am</option>
+            <option value="6">6 am</option>
+            <option value="7">7 am</option>
+            <option value="8">8 am</option>
+            <option value="9">9 am</option>
+          </select>
+          <p class="hint">Used when the schedule leaves out am and pm. A start time earlier than this is read as pm, so "5-10" becomes 5 pm to 10 pm.</p>
+        </div>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Look</legend>
+        <div class="field">
+          <span class="label" id="hl-label">Highlighter</span>
+          <div class="swatches" role="radiogroup" aria-labelledby="hl-label" id="set-highlighter">
+            <label class="swatch swatch--yellow"><input type="radio" name="hl" value="yellow"><span>Yellow</span></label>
+            <label class="swatch swatch--green"><input type="radio" name="hl" value="green"><span>Green</span></label>
+            <label class="swatch swatch--pink"><input type="radio" name="hl" value="pink"><span>Pink</span></label>
+            <label class="swatch swatch--orange"><input type="radio" name="hl" value="orange"><span>Orange</span></label>
+            <label class="swatch swatch--blue"><input type="radio" name="hl" value="blue"><span>Blue</span></label>
+          </div>
+        </div>
+        <div class="field field--half">
+          <label for="set-theme">Theme</label>
+          <select id="set-theme">
+            <option value="auto">Match this device</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+        <div class="field field--half">
+          <label for="set-clock">Clock</label>
+          <select id="set-clock">
+            <option value="12">12-hour (5:30 pm)</option>
+            <option value="24">24-hour (17:30)</option>
+          </select>
+        </div>
+        <div class="field field--half">
+          <label for="set-week">Week starts on</label>
+          <select id="set-week">
+            <option value="0">Sunday</option>
+            <option value="1">Monday</option>
+          </select>
+        </div>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Your data</legend>
+        <p class="hint">Everything is stored in this browser on this device. A backup file lets you move it to another browser or phone.</p>
+        <div class="btn-row">
+          <button type="button" class="btn" id="data-backup">Download backup</button>
+          <button type="button" class="btn" id="data-restore">Restore backup</button>
+          <input type="file" id="restore-input" accept="application/json,.json" hidden>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn btn--danger" id="data-clear-shifts">Delete all shifts</button>
+          <button type="button" class="btn btn--danger" id="data-reset">Reset ShiftCal</button>
+        </div>
+        <p class="field-error" id="data-msg" role="status" hidden></p>
+      </fieldset>
+
+      <fieldset class="group" id="diag-group" hidden>
+        <legend>If the shifts came out wrong</legend>
+        <p class="hint">This is the text ShiftCal read from the last schedule you opened. It is kept only until you close this page.</p>
+        <details>
+          <summary>Show the text</summary>
+          <pre id="diag-text" tabindex="0"></pre>
+        </details>
+      </fieldset>
+
+      <div class="dlg__actions">
+        <span class="spacer"></span>
+        <button type="submit" class="btn btn--primary">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Yes / no questions -->
+  <dialog id="dlg-confirm" class="dlg" aria-labelledby="confirm-title">
+    <form method="dialog" class="dlg__in">
+      <h2 id="confirm-title" tabindex="-1"></h2>
+      <p id="confirm-text"></p>
+      <div class="dlg__actions">
+        <span class="spacer"></span>
+        <button type="submit" value="no" class="btn btn--quiet" id="confirm-no">Cancel</button>
+        <button type="submit" value="yes" class="btn btn--danger" id="confirm-yes"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="drop" id="drop" hidden><p>Drop the schedule PDF or photo here</p></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
